@@ -1,96 +1,71 @@
-#' Load CEFI data
-#' 
-#' This function lazy loads CEFI data from a thredds url and reads a time slice into memory.
-#' 
-#' @param inurl Thredds data url
-#' @returns Time sliced data structure
-#' @export
-load_data_opendap <- function(inurl){
-  # Specify the OPeNDAP server URL (using regular grid output)
-  url <- "http://psl.noaa.gov/thredds/dodsC/Projects/CEFI/regional_mom6/northwest_atlantic/hist_run/regrid/ocean_monthly.199301-201912.sos.nc"
+load_data_aws <- function(path){
   
-  # Open a NetCDF file lazily and remotely
-  ncopendap <- ncdf4::nc_open(url)
+  aws_exists <- aws.s3::bucket_exists(
+    bucket = "s3://noaa-oar-cefi-regional-mom6-pds/",
+    region = "us-east-1"
+  )
   
-  # Read the data into memory
-  timeslice = 1
-  lon <- ncdf4::ncvar_get(ncopendap, "lon")
-  lat <- ncdf4::ncvar_get(ncopendap, "lat")
-  time <- ncdf4::ncvar_get(ncopendap, "time",start = c(timeslice), count = c(1))
+  if (!(aws_exists)){
+    stop("AWS bucket does not exist")
+  }
   
-  # Read a slice of the data into memory
-  sos <- ncdf4::ncvar_get(ncopendap, "sos", start = c(1, 1, timeslice), count = c(-1, -1, 1))
-  sos
+  print("Downloading file and storing it in work directory")
+  aws.s3::save_object(
+    object = path,
+    bucket = "s3://noaa-oar-cefi-regional-mom6-pds/",
+    region = "us-east-1",
+    file = "bfg_1994010100_fhr09_fluxes_control.nc"
+  )
+  print("File downloaded")
   
-  # Get the units
-  tunits <- ncdf4::ncatt_get(ncopendap, "time", "units")
-  datesince <- tunits$value
-  datesince <- substr(datesince, nchar(datesince)-9, nchar(datesince))
-  datesince
-  
-  # convert the number to datetime (input should be in second while the time is in unit of days)
-  datetime_var <- as.POSIXct(time*86400, origin=datesince, tz="UTC")
-  datetime_var
-  
-  #filled.contour(lon, lat, sos, main = paste("Sea surface salinity at ", datetime_var), xlab = "Longitude", ylab = "Latitude", levels = pretty(c(20,40), 20))
+  ncaws <- ncdf4::nc_open(url)
+  return (ncaws)
 }
 
-load_data_aws <- function(inurl){
-  # Specify the OPeNDAP server URL (using regular grid output)
-  url <- "http://psl.noaa.gov/thredds/dodsC/Projects/CEFI/regional_mom6/northwest_atlantic/hist_run/regrid/ocean_monthly.199301-201912.sos.nc"
-  
+load_data_opendap <- function(path){
   # Open a NetCDF file lazily and remotely
-  ncopendap <- ncdf4::nc_open(url)
-  
-  # Read the data into memory
-  timeslice = 1
-  lon <- ncdf4::ncvar_get(ncopendap, "lon")
-  lat <- ncdf4::ncvar_get(ncopendap, "lat")
-  time <- ncdf4::ncvar_get(ncopendap, "time",start = c(timeslice), count = c(1))
-  
-  # Read a slice of the data into memory
-  sos <- ncdf4::ncvar_get(ncopendap, "sos", start = c(1, 1, timeslice), count = c(-1, -1, 1))
-  sos
-  
-  # Get the units
-  tunits <- ncdf4::ncatt_get(ncopendap, "time", "units")
-  datesince <- tunits$value
-  datesince <- substr(datesince, nchar(datesince)-9, nchar(datesince))
-  datesince
-  
-  # convert the number to datetime (input should be in second while the time is in unit of days)
-  datetime_var <- as.POSIXct(time*86400, origin=datesince, tz="UTC")
-  datetime_var
-  
-  #filled.contour(lon, lat, sos, main = paste("Sea surface salinity at ", datetime_var), xlab = "Longitude", ylab = "Latitude", levels = pretty(c(20,40), 20))
+  ncopendap <- ncdf4::nc_open(path)
+  return (ncopendap)
 }
 
-load_data_local <- function(path){
-  # Specify the OPeNDAP server URL (using regular grid output)
-  path <- "/data/CEFI/"
+
+
+load_data <- function(data_source, path, variable, timeslice, ensemble=1){
+  #Variable check
+  sources_valid <- list("aws","opendap","local")
+  if (!(data_source %in% sources_valid)) {
+    stop("Data source should be 'aws', 'opendap', or 'local'")
+  }
   
-  # Open a NetCDF file lazily and remotely
-  ncfile <- ncdf4::nc_open(path)
+  #Retrieve ncfile via lazy load
+  if (data_source == "aws") {
+    print("WARNING: Using AWS will download the entire data file into your working direcotry")
+    ncfile <- load_data_aws(path)
+  } else if (data_source == "opendap") {
+    ncfile <- load_data_opendap(path)
+  } else {
+    ncfile <- ncdf4::nc_open(path)
+  }
   
-  # Read the data into memory
-  timeslice = 1
-  lon <- ncdf4::ncvar_get(ncfile, "lon")
+  print(ncfile)
+  lon <- ncdf4::ncvar_get(ncfile, "lon",verbose=TRUE)
   lat <- ncdf4::ncvar_get(ncfile, "lat")
   time <- ncdf4::ncvar_get(ncfile, "time",start = c(timeslice), count = c(1))
-  
+  print("******************")
   # Read a slice of the data into memory
-  sos <- ncdf4::ncvar_get(ncfile, "sos", start = c(1, 1, timeslice), count = c(-1, -1, 1))
-  sos
+  slice <- ncdf4::ncvar_get(ncfile, variable, start = c(1, 1, 1), count = c(-1, -1, 1))
   
   # Get the units
-  tunits <- ncdf4::ncatt_get(ncfile, "time", "units")
+  tunits <- ncdf4::ncatt_get(ncfile, "lead", "units")
   datesince <- tunits$value
   datesince <- substr(datesince, nchar(datesince)-9, nchar(datesince))
-  datesince
   
   # convert the number to datetime (input should be in second while the time is in unit of days)
   datetime_var <- as.POSIXct(time*86400, origin=datesince, tz="UTC")
-  datetime_var
   
-  #filled.contour(lon, lat, sos, main = paste("Sea surface salinity at ", datetime_var), xlab = "Longitude", ylab = "Latitude", levels = pretty(c(20,40), 20))
+  df <- expand.grid(X = lon, Y = lat)
+  data <- as.vector(t(sos))
+  df$Data <- data
+  names(df) <- c("lon", "lat", "sos")
+  return (df)
 }
