@@ -53,10 +53,10 @@ load_data <- function(data_source, path, variable, timeslice, ensemble=1){
   time <- ncdf4::ncvar_get(ncfile, "time",start = c(timeslice), count = c(1))
   print("******************")
   # Read a slice of the data into memory
-  slice <- ncdf4::ncvar_get(ncfile, variable, start = c(1, 1, 1), count = c(-1, -1, 1))
+  slice <- ncdf4::ncvar_get(ncfile, variable, start = c(1, 1, timeslice), count = c(-1, -1, 1))
   
   # Get the units
-  tunits <- ncdf4::ncatt_get(ncfile, "lead", "units")
+  tunits <- ncdf4::ncatt_get(ncfile, "time", "units")
   datesince <- tunits$value
   datesince <- substr(datesince, nchar(datesince)-9, nchar(datesince))
   
@@ -64,7 +64,7 @@ load_data <- function(data_source, path, variable, timeslice, ensemble=1){
   datetime_var <- as.POSIXct(time*86400, origin=datesince, tz="UTC")
   
   df <- expand.grid(X = lon, Y = lat)
-  data <- as.vector(t(sos))
+  data <- as.vector(t(slice))
   df$Data <- data
   names(df) <- c("lon", "lat", "sos")
   return (df)
