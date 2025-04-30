@@ -1,3 +1,17 @@
+#' Load CEFI data
+#' 
+#' This function lazy loads CEFI data from a thredds url and reads a time slice into memory.
+#' 
+#' @param data_source Where the user would like to pull data from
+#' @param path Direct path to data including file name
+#' @param variable Variable to be retrieved from dataset
+#' @param timeslice User selected time slice
+#' @param ensemble Optional variable to choose ensemble for forecast variables
+#' @param export Optional variable to export dataframe as a .csv file in the work directory
+#' @returns Time sliced data structure
+#' @export
+
+
 load_data_aws <- function(path){
   
   aws_exists <- aws.s3::bucket_exists(
@@ -30,7 +44,7 @@ load_data_opendap <- function(path){
 
 
 
-load_data <- function(data_source, path, variable, timeslice, ensemble=1){
+load_data <- function(data_source, path, variable, timeslice, ensemble=1, export=FALSE){
   #Variable check
   sources_valid <- list("aws","opendap","local")
   if (!(data_source %in% sources_valid)) {
@@ -47,25 +61,59 @@ load_data <- function(data_source, path, variable, timeslice, ensemble=1){
     ncfile <- ncdf4::nc_open(path)
   }
   
-  print(ncfile)
+  parts <- strsplit(path, split = "/")[[1]]
+  
   lon <- ncdf4::ncvar_get(ncfile, "lon",verbose=TRUE)
   lat <- ncdf4::ncvar_get(ncfile, "lat")
-  time <- ncdf4::ncvar_get(ncfile, "time",start = c(timeslice), count = c(1))
-  print("******************")
-  # Read a slice of the data into memory
-  slice <- ncdf4::ncvar_get(ncfile, variable, start = c(1, 1, timeslice), count = c(-1, -1, 1))
   
-  # Get the units
-  tunits <- ncdf4::ncatt_get(ncfile, "time", "units")
-  datesince <- tunits$value
-  datesince <- substr(datesince, nchar(datesince)-9, nchar(datesince))
+  indices <- grep("forecast",parts)
   
-  # convert the number to datetime (input should be in second while the time is in unit of days)
-  datetime_var <- as.POSIXct(time*86400, origin=datesince, tz="UTC")
+  if (indices!=0) {
+    time <- ncdf4::ncvar_get(ncfile, "lead",start = c(timeslice), count = c(1))
+    print("******************")
+    # Read a slice of the data into memory
+    slice <- ncdf4::ncvar_get(ncfile, variable, start = c(1, 1, timeslice, ensemble), count = c(-1, -1, 1, 1))
+    
+    # Get the units
+    tunits <- ncdf4::ncatt_get(ncfile, "lead", "units")
+    datesince <- tunits$value
+    datesince <- substr(datesince, nchar(datesince)-9, nchar(datesince))
+    
+    # convert the number to datetime (input should be in second while the time is in unit of days)
+    datetime_var <- as.POSIXct(time*86400, origin=datesince, tz="UTC")
+    
+    df <- expand.grid(X = lon, Y = lat)
+    data <- as.vector(t(slice))
+    df$Data <- data
+    names(df) <- c("lon", "lat", "sos")
+  } else {
+    time <- ncdf4::ncvar_get(ncfile, "time",start = c(timeslice), count = c(1))
+    
+    # Read a slice of the data into memory
+    slice <- ncdf4::ncvar_get(ncfile, variable, start = c(1, 1, timeslice), count = c(-1, -1, 1))
+    
+    # Get the units
+    tunits <- ncdf4::ncatt_get(ncfile, "time", "units")
+    datesince <- tunits$value
+    datesince <- substr(datesince, nchar(datesince)-9, nchar(datesince))
+    
+    # convert the number to datetime (input should be in second while the time is in unit of days)
+    datetime_var <- as.POSIXct(time*86400, origin=datesince, tz="UTC")
+    
+    df <- expand.grid(X = lon, Y = lat)
+    data <- as.vector(t(slice))
+    df$Data <- data
+    names(df) <- c("lon", "lat", "sos")
+  }
   
-  df <- expand.grid(X = lon, Y = lat)
-  data <- as.vector(t(slice))
-  df$Data <- data
-  names(df) <- c("lon", "lat", "sos")
+  #Export to csv
+  if (export){
+    file = tail(parts,n=1)
+    file_name = substr(file,1,nchar(file)-3)
+    export_file = paste(file_name,".csv",sep="")
+    write.csv(df,export_file)
+    print(paste("Data written to",export_file))
+  }
+  
   return (df)
 }
